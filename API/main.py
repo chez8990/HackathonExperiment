@@ -2,9 +2,11 @@ import argparse
 import os
 import json
 import numpy as np
+import nlp_lib
+import multiprocessing as mp
 from flask import Flask
 from flask_restful import reqparse, abort, Api, Resource
-from LibNLP import Named
+from functools import partial
 
 THIS_DIR = os.path.dirname(__file__)
 
@@ -20,51 +22,63 @@ class TextAnalytics(Resource):
 
     def post(self):
         args = self.parser.parse_args()
-        text = json.loads(args['text'])
+        print(args)
+        text = args['text']
 
-        # Call NER pipeline
+        try:
+            # Call NER pipeline
+            entities = nlp_lib.NER.extract_interesting_entities(text)
 
+            # q = mp.Queue()
 
-class FindFaceImage(Resource):
+            jobs = [nlp_lib.google_news_query, nlp_lib.hkex_query, nlp_lib.law_suits_data,
+                    nlp_lib.stock_data, nlp_lib.twitter_data]
+            names = ['GoogleNews', 'TabularData', 'HKEX', 'LawSuits', 'StockData', 'Twitter']
+            results = {}
+
+            results['GoogleNews'] = nlp_lib.google_news_query(entities)
+            results['StockData'] = nlp_lib.stock_data(text)
+
+            # package response
+            response = {
+                'entites': entities,
+                'suggestions': results,
+                'status code': 200,
+                'message': 'success'
+            }
+            return response
+        except Exception as e:
+            abort(500, message=e)
+
+class SummaryAnalytics(Resource):
     def __init__(self):
         self.parser = reqparse.RequestParser()
-        self.parser.add_argument('image', type=str, location='form')
+        self.parser.add_argument('text', type=str, location='form')
         super().__init__()
 
     def post(self):
         args = self.parser.parse_args()
-        img_dict = json.loads(args['image'])
-        img_array = []
-        for name, img in img_dict.items():
-            try:
-                img = utils.parse_base64.base64_to_image(img)
-                img = utils.image_process.preprocess(img)
-                img_array.append(img)
-            except Exception as e:
-                print(e)
-                pass
+        print(args)
+        text = args['text']
 
-        if len(img_array) == 0:
-            abort(500, message='No face was found in the images')
-            # response = {'data':None,
-            #             'status': 500,
-            #             'message': 'No face was found in the images.'}
-        else:
-            img_array = np.array(img_array).reshape(-1, 160, 160, 3)
-            face_probability = one_off_inference(img_array)
+        try:
+            results = {}
+            results['TabularData'] = nlp_lib.tabular_extracion(nlp_lib.NLP(text), text)
 
-            url_template = 'https://www.japanesebeauties.net/japanese/{}/1/{}-1.jpg'
-
-            data = [{'name': k, 'score': str(round(v, 4)), 'url': url_template.format(k, k)} for k, v in
-                    face_probability]
-            response = {'data': data,
-                        'status': 200,
-                        'message': 'Success'}
+            # package response
+            response = {
+                'suggestions': results,
+                'status code': 200,
+                'message': 'success'
+            }
             return response
+        except Exception as e:
+            abort(500, message=e)
 
 
 
-api.add_resource(FindFaceImage, '/image')
+api.add_resource(TextAnalytics, '/text')
+api.add_resource(SummaryAnalytics, '/adhocSummary')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Get port numbers')
@@ -73,4 +87,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     port = args.port
     #
-    app.run(port=port,  debug=False)
+    app.run(port=port, host='0.0.0.0', debug=False)
